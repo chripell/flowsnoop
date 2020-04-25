@@ -4,8 +4,6 @@
 #include <net/sock.h>
 #include <bcc/proto.h>
 
-#define LOCALHOST ((1<<24) + 127)
-
 struct conn_s{
   u32 src_ip;
   u32 dst_ip;
@@ -13,7 +11,7 @@ struct conn_s{
   u16 dst_port;
   u8 protocol;
 };
-BPF_HISTOGRAM(connections, struct conn_s, 16384);
+BPF_HISTOGRAM(connections, struct conn_s, BUCKETS);
 
 static inline struct tcphdr *skb_to_tcphdr(const struct sk_buff *skb)
 {
@@ -27,38 +25,58 @@ static inline struct iphdr *skb_to_iphdr(const struct sk_buff *skb)
   return (struct iphdr *)(skb->head + skb->network_header);
 }
 
-static void do_count(struct sk_buff *skb) {
+static int do_count4(struct sk_buff *skb, int len) {
   struct iphdr *ip = skb_to_iphdr(skb);
   unsigned char *pc = (unsigned char *) ip;
   struct conn_s conn = {};
-  int len = skb->len;
-  if ((pc[0] & 0xf0) != 0x40	/* IPv4 only */
-      || (ip->protocol != 6 && ip->protocol != 17) /* UDP and TCP */
-      || ip->saddr == LOCALHOST || ip->daddr == LOCALHOST /* Ignore localhost */
-      )
-    return;
+  if ((pc[0] & 0xf0) != 0x40)	/* IPv4 only */
+    return -1;
   conn.protocol = ip->protocol;
   conn.src_ip = ip->saddr;
   conn.dst_ip = ip->daddr;
-  struct tcphdr *tcp = skb_to_tcphdr(skb);
-  conn.src_port = tcp->source;
-  conn.dst_port = tcp->dest;
-  // TODO: check skb->data_len != 0.
+  if (ip->protocol == 6 || ip->protocol == 17) { /* TCP and UDP have ports */
+    struct tcphdr *tcp = skb_to_tcphdr(skb);
+    conn.src_port = tcp->source;
+    conn.dst_port = tcp->dest;
+  } else {
+    conn.src_port = 0;
+    conn.dst_port = 0;
+  }
   connections.increment(conn, len);
-  // For debugging
-  // bpf_trace_printk("%x %d\n", pc[0], ip->protocol);
+  return 0;
+}
+
+static int equal(char *src, char *dst, int n) {
+  int i;
+  for(i=0; i<n; i++)
+    if (src[i] != dst[i])
+      return 1;
+  return 0;
+}
+
+static void do_count(struct sk_buff *skb, int len, char *dev) {
+  DEVS;
+  if (CMPS) /* connected by && */
+    return;
+  if (0 == do_count4(skb, len))
+    return;
+  /* TODO count IPv6 here */
 }
 
 TRACEPOINT_PROBE(net, netif_receive_skb) {
   // args is from /sys/kernel/debug/tracing/events/net/netif_rx/format
+  char dev[16];
   struct sk_buff *skb = (struct sk_buff *) args->skbaddr;
-  do_count(skb);
+  TP_DATA_LOC_READ_CONST(dev, name, 16);
+  do_count(skb, args->len, dev);
   return 0;
 };
 
 TRACEPOINT_PROBE(net, net_dev_start_xmit) {
   // args is from /sys/kernel/debug/tracing/events/net/net_dev_start_xmit/format
+  char dev[16];
   struct sk_buff *skb = (struct sk_buff *) args->skbaddr;
-  do_count(skb);
+  TP_DATA_LOC_READ_CONST(dev, name, 16);
+  do_count(skb, args->len, dev);
   return 0;
 };

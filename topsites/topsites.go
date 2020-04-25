@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/chripell/flowsnoop/flow"
+	humanize "github.com/dustin/go-humanize"
 )
 
 type site struct {
@@ -29,26 +31,31 @@ func newKIP4(ip []byte) keyIP {
 }
 
 type TopSites struct {
-	m map[keyIP]*site
-	l []*site
+	header string
+	m      map[keyIP]*site
+	l      []*site
 }
 
 var (
-	header = flag.String("topsites_header", "---\\n", "print this string before every update, string is "+
-		"unquoted so you can use \\0x0c for reset to the top of the screen.")
+	header = flag.String("topsites_header", `---\n`, "print this string before every update, string is "+
+		"unquoted so you can use \\f for reset to the top of the screen and \\n for new line.")
 	resolve = flag.Int("topsites_resolve", 5, "concurrent DNS resolutions. If 0, don't resolve IPs. ")
 	topn    = flag.Int("topsites_n", 20, "Number of sites to show. ")
+	pretty  = flag.Bool("topsites_pretty", true, "Pretty print numbers.")
 )
 
-func (ts TopSites) Init() error {
+func (ts *TopSites) Init() error {
+	ts.header = strings.Replace(*header, `\n`, "\n", -1)
+	ts.header = strings.Replace(ts.header, `\f`,
+		"\033[H\033[2J", -1)
 	ts.m = make(map[keyIP]*site)
 	return nil
 }
 
-func (ts TopSites) Push(tick time.Time,
+func (ts *TopSites) Push(tick time.Time,
 	flowsL4 flow.List4, flowsM4 flow.Map4,
 	flowsL6 flow.List6, flowsM6 flow.Map6) error {
-	fmt.Print(*header)
+	fmt.Print(ts.header)
 	now := time.Now().Unix()
 	if len(flowsL4) > 0 {
 		for _, fl := range flowsL4 {
@@ -97,7 +104,7 @@ func (ts TopSites) Push(tick time.Time,
 			}
 		}
 	}
-	if *resolve > 0 {
+	if *resolve <= 0 {
 		for kip, site := range ts.m {
 			if site.resolved == "" {
 				ip := net.IP(kip[:])
@@ -108,6 +115,9 @@ func (ts TopSites) Push(tick time.Time,
 		tokens := make(chan struct{}, *resolve)
 		var wg sync.WaitGroup
 		for kip, si := range ts.m {
+			if si.resolved != "" {
+				continue
+			}
 			tokens <- struct{}{}
 			wg.Add(1)
 			go func(kip keyIP, si *site) {
@@ -140,14 +150,20 @@ func (ts TopSites) Push(tick time.Time,
 	if l > *topn {
 		l = *topn
 	}
-	for _, si := range ts.l[:l] {
-		fmt.Printf("%s: from %d to %d\n", si.resolved, si.from, si.to)
+	if *pretty {
+		for _, si := range ts.l[:l] {
+			fmt.Printf("%s: from %s to %s\n", si.resolved, humanize.Bytes(si.from), humanize.Bytes(si.to))
+		}
+	} else {
+		for _, si := range ts.l[:l] {
+			fmt.Printf("%s: from %d to %d\n", si.resolved, si.from, si.to)
+		}
 	}
 	ts.l = ts.l[:0]
 	return nil
 }
 
-func (ts TopSites) Finalize() error {
+func (ts *TopSites) Finalize() error {
 	return nil
 }
 

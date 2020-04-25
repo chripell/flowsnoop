@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/chripell/flowsnoop/flow"
@@ -44,20 +46,41 @@ func LoadAttach(m *bpf.Module, category, event string) error {
 	return nil
 }
 
-var iface = flag.String("ebpf1_iface", "",
-	"Interfaces on which should listed")
+var (
+	iface = flag.String("ebpf1_iface", "all",
+		"Interfaces on which should listed (comma separated) or all.")
+	buckets = flag.Int("ebpf1_buckets", 1024, "buckets for in-kernel tables.")
+)
 
 func (ebpf *Ebpf1) Init(consumer flow.Consumer) error {
 	ebpf.consumer = consumer
-	f, err := _escLocal.Open("flowsnoop1.c")
+	f, err := _escStatic.Open("/c/flowsnoop1.c")
 	if err != nil {
 		return fmt.Errorf("cannot open ebpf source: %w", err)
 	}
-	src, err := ioutil.ReadAll(f)
+	bsrc, err := ioutil.ReadAll(f)
 	if err != nil {
 		return fmt.Errorf("cannot read ebpf source: %w", err)
 	}
-	ebpf.m = bpf.NewModule(string(src), []string{})
+	src := string(bsrc)
+	src = strings.Replace(src, "BUCKETS", strconv.Itoa(*buckets), -1)
+	var (
+		devs []string
+		cmps []string
+	)
+	if *iface == "all" {
+		devs = append(devs, "")
+		cmps = append(cmps, "0")
+	} else {
+		ifaces := strings.Split(*iface, ",")
+		for i, ifx := range ifaces {
+			devs = append(devs, fmt.Sprintf(`char dev%d[] = "%s";`, i, ifx))
+			cmps = append(cmps, fmt.Sprintf(`equal(dev%d, dev, %d)`, i, len(ifx)))
+		}
+	}
+	src = strings.Replace(src, "DEVS;", strings.Join(devs, "\n"), -1)
+	src = strings.Replace(src, "CMPS", strings.Join(cmps, "&&"), -1)
+	ebpf.m = bpf.NewModule(src, []string{})
 	for _, probe := range []string{"netif_receive_skb", "net_dev_start_xmit"} {
 		if err := LoadAttach(ebpf.m, "net", probe); err != nil {
 			return fmt.Errorf("error loading/attaching probe %s: %w", probe, err)
@@ -104,6 +127,7 @@ func (ebpf *Ebpf1) Run(ctx context.Context, flush <-chan (chan<- error)) {
 				return
 			}
 			flows4 = flows4[:0]
+			chErr <- nil
 		}
 	}()
 }
