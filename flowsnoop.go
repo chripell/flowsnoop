@@ -1,150 +1,86 @@
 package main
 
 import (
-	"encoding/binary"
+	"context"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
-	"net"
 	"os"
 	"os/signal"
-	"sort"
+	"strings"
 	"time"
 
-	bpf "github.com/iovisor/gobpf/bcc"
-	"gopkg.in/restruct.v1"
+	"github.com/chripell/flowsnoop/ebpf1"
+	"github.com/chripell/flowsnoop/flow"
+	"github.com/chripell/flowsnoop/showflows"
+	"github.com/chripell/flowsnoop/topsites"
 )
 
-type Flow struct {
-	SrcIP   [4]byte `struct:"[4]byte"`
-	DstIP   [4]byte `struct:"[4]byte"`
-	SrcPort uint16  `struct:"uint16"`
-	DstPort uint16  `struct:"uint16"`
-	Proto   uint8   `struct:"uint8"`
-}
-
-type FlowT struct {
-	flow Flow
-	tot  uint64
-}
-
-func tracepointProbe(category, event string) string {
-	return fmt.Sprintf("tracepoint__%s__%s", category, event)
-}
-
-func loadAttach(m *bpf.Module, category, event string) error {
-	name := tracepointProbe(category, event)
-	fd, err := m.LoadTracepoint(name)
-	if err != nil {
-		return fmt.Errorf("loading tracepoint %s failed: %w", name, err)
-	}
-	name = category + ":" + event
-	if err := m.AttachTracepoint(name, fd); err != nil {
-		return fmt.Errorf("attaching tracepoint %s failed: %w", name, err)
-	}
-	return nil
-}
-
-func protoToString(proto uint8) string {
-	if proto == 17 {
-		return "udp"
-	}
-	return "tcp"
-}
-
 func main() {
-	ebpfSource := flag.String("ebpf_program", "flowsnoop.c", "ebpf program to load")
-
-	flag.Parse()
-
-	src, err := ioutil.ReadFile(*ebpfSource)
-	if err != nil {
-		log.Fatalf("Cannot load source file %q: %v", src, err)
+	producers := map[string]flow.Producer{
+		"ebpf1": ebpf1.New(),
 	}
-	m := bpf.NewModule(string(src), []string{})
-	defer m.Close()
+	consumers := map[string]flow.Consumer{
+		"topsites":  topsites.New(),
+		"showflows": showflows.New(),
+	}
+	every := flag.Duration("every", time.Duration(30)*time.Second, "Interval between display refreshes. ")
+	var (
+		producersL []string
+		consumersL []string
+	)
+	for n := range producers {
+		producersL = append(producersL, n)
+	}
+	for n := range consumers {
+		consumersL = append(consumersL, n)
+	}
+	consumerS := flag.String("consumer", "topsites", "consumer module: "+strings.Join(consumersL, ","))
+	producerS := flag.String("producer", "ebpf1", "producer module: "+strings.Join(consumersL, ","))
+	flag.Parse()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, os.Kill)
 
-	if err := loadAttach(m, "net", "netif_receive_skb"); err != nil {
-		fmt.Printf("Error loading/attaching probe: %v", err)
-	}
-	if err := loadAttach(m, "net", "net_dev_start_xmit"); err != nil {
-		fmt.Printf("Error loading/attaching probe: %v", err)
-	}
-
-	tableId := m.TableId("connections")
-	tableDesc := m.TableDesc(uint64(tableId))
-	if name, ok := tableDesc["name"].(string); ok {
-		fmt.Printf("Table Name: %s\n", name)
-	}
-	if len, ok := tableDesc["key_size"].(uint64); ok {
-		fmt.Printf("Key Size: %d\n", len)
-	}
-	if len, ok := tableDesc["leaf_size"].(uint64); ok {
-		fmt.Printf("Leaf Size: %d\n", len)
-	}
-	if name, ok := tableDesc["key_desc"].(string); ok {
-		fmt.Printf("Key Description: %s\n", name)
-	}
-	if name, ok := tableDesc["leaf_desc"].(string); ok {
-		fmt.Printf("Leaf Description: %s\n", name)
-	}
 	fmt.Println("Press C-c to stop")
 
-	table := bpf.NewTable(tableId, m)
-	flows := make(map[Flow]uint64)
+	consumer, ok := consumers[*consumerS]
+	if !ok {
+		log.Fatalf("No such consumer: %s", *consumerS)
+	}
+	producer, ok := producers[*producerS]
+	if !ok {
+		log.Fatalf("No such producer: %s", *producerS)
+	}
+	if err := consumer.Init(); err != nil {
+		log.Fatalf("Consumer init failed: %v", err)
+	}
+	if err := producer.Init(consumer); err != nil {
+		log.Fatalf("Producer init failed: %v", err)
+	}
+	dump := make(chan (chan<- error))
+	ctx, cancel := context.WithCancel(context.Background())
+	producer.Run(ctx, dump)
 end_loop:
 	for {
 		select {
 		case <-sig:
 			break end_loop
-		case <-time.After(time.Second):
+		case <-time.After(*every):
+			break
 		}
-		fmt.Println("--------------")
-		for it := table.Iter(); it.Next(); {
-			var flow Flow
-			data := it.Key()
-			if err := restruct.Unpack(data, binary.BigEndian, &flow); err != nil {
-				fmt.Printf("Unpacking of flow failed: %v\n", err)
-				continue
-			}
-			flows[flow] += binary.LittleEndian.Uint64(it.Leaf())
+		errCh := make(chan error)
+		dump <- errCh
+		if err := <-errCh; err != nil {
+			log.Printf("Error from producer: %v", err)
+			break
 		}
-		if err := table.Iter().Err(); err != nil {
-			fmt.Printf("Error iterating table: %v\n", err)
-		}
-		if err := table.DeleteAll(); err != nil {
-			fmt.Printf("Error flushing table: %v", err)
-		}
-		flowList := make([]FlowT, 0, len(flows))
-		for flow, tot := range flows {
-			flowList = append(flowList, FlowT{flow, tot})
-		}
-		sort.Slice(flowList, func(i, j int) bool {
-			if flowList[i].tot > flowList[j].tot {
-				return true
-			}
-			return false
-		})
-		l := len(flowList)
-		if l > 20 {
-			l = 20
-		}
-		for _, el := range flowList[:l] {
-			srcAddr := net.TCPAddr{
-				IP:   net.IP(el.flow.SrcIP[:]),
-				Port: int(el.flow.SrcPort),
-			}
-			dstAddr := net.TCPAddr{
-				IP:   net.IP(el.flow.DstIP[:]),
-				Port: int(el.flow.DstPort),
-			}
-			fmt.Printf("%s -> %s, %s: ", srcAddr.String(),
-				dstAddr.String(), protoToString(el.flow.Proto))
-			fmt.Printf("%d\n", el.tot)
-		}
+	}
+	cancel()
+	if err := consumer.Finalize(); err != nil {
+		log.Printf("Consumer finalization failed: %v", err)
+	}
+	if err := producer.Finalize(); err != nil {
+		log.Printf("Producer finalization  failed: %v", err)
 	}
 }

@@ -1,8 +1,11 @@
 
 all: flowsnoop
 
-flowsnoop: flowsnoop.go
-	go build flowsnoop.go
+.PHONY: flowsnoop
+flowsnoop: 
+	go build ./...
 
+.PHONY: flowsnoop
 clean:
-	rm -f flowsnoop *~
+	rm -f flowsnoop
+	find . -name '*~' -exec rm {} \;
