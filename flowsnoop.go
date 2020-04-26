@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chripell/flowsnoop/afp"
 	"github.com/chripell/flowsnoop/ebpf1"
 	"github.com/chripell/flowsnoop/flow"
 	"github.com/chripell/flowsnoop/showflows"
@@ -19,6 +20,7 @@ import (
 func main() {
 	producers := map[string]flow.Producer{
 		"ebpf1": ebpf1.New(),
+		"afp":   afp.New(),
 	}
 	consumers := map[string]flow.Consumer{
 		"topsites":  topsites.New(),

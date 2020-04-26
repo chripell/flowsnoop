@@ -5,6 +5,7 @@ go 1.14
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.0
+	github.com/google/gopacket v1.1.17
 	github.com/iovisor/gobpf v0.0.0-20200417061255-f0a208deaea5
 	github.com/kr/pretty v0.1.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
