@@ -74,7 +74,7 @@ func (ts *TopSites) Push(tick time.Time,
 				s.to += fl.Tot
 				s.last = now
 			} else {
-				ts.m[fkip] = &site{
+				ts.m[tkip] = &site{
 					to:   fl.Tot,
 					last: now,
 				}
@@ -97,7 +97,7 @@ func (ts *TopSites) Push(tick time.Time,
 				s.to += tot
 				s.last = now
 			} else {
-				ts.m[fkip] = &site{
+				ts.m[tkip] = &site{
 					to:   tot,
 					last: now,
 				}
@@ -132,7 +132,7 @@ func (ts *TopSites) Push(tick time.Time,
 					si.resolved = ips
 					return
 				}
-				si.resolved = addrs[0]
+				si.resolved = strings.TrimRight(addrs[0], ".")
 			}(kip, si)
 		}
 		wg.Wait()
