@@ -77,6 +77,6 @@ TRACEPOINT_PROBE(net, net_dev_start_xmit) {
   char dev[16];
   struct sk_buff *skb = (struct sk_buff *) args->skbaddr;
   TP_DATA_LOC_READ_CONST(dev, name, 16);
-  do_count(skb, args->len, dev);
+  do_count(skb, args->len - args->network_offset, dev);
   return 0;
 };
