@@ -31,13 +31,13 @@ type Sample6 struct {
 }
 
 type Sample6L struct {
-	Flow Sample4
+	Flow Sample6
 	Tot  uint64
 }
 
-type Map6 map[Sample4]uint64
+type Map6 map[Sample6]uint64
 
-type List6 []Sample4L
+type List6 []Sample6L
 
 type Consumer interface {
 	Init() error

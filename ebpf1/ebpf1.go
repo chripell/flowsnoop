@@ -26,6 +26,7 @@ type Ebpf1 struct {
 	m        *bpf.Module
 	consumer flow.Consumer
 	table    *bpf.Table
+	table6   *bpf.Table
 	finished chan struct{}
 }
 
@@ -88,6 +89,8 @@ func (ebpf *Ebpf1) Init(consumer flow.Consumer) error {
 	}
 	tableId := ebpf.m.TableId("connections")
 	ebpf.table = bpf.NewTable(tableId, ebpf.m)
+	tableId6 := ebpf.m.TableId("connections6")
+	ebpf.table6 = bpf.NewTable(tableId6, ebpf.m)
 	ebpf.finished = make(chan struct{})
 	return nil
 }
@@ -95,7 +98,10 @@ func (ebpf *Ebpf1) Init(consumer flow.Consumer) error {
 func (ebpf *Ebpf1) Run(ctx context.Context, flush <-chan (chan<- error)) {
 	go func() {
 		defer close(ebpf.finished)
-		var flows4 []flow.Sample4L
+		var (
+			flows4 []flow.Sample4L
+			flows6 []flow.Sample6L
+		)
 		for {
 			var chErr chan<- error
 			select {
@@ -104,6 +110,7 @@ func (ebpf *Ebpf1) Run(ctx context.Context, flush <-chan (chan<- error)) {
 			case chErr = <-flush:
 				break
 			}
+			// IPv4
 			for it := ebpf.table.Iter(); it.Next(); {
 				var fl flow.Sample4
 				if err := restruct.Unpack(it.Key(), binary.BigEndian, &fl); err != nil {
@@ -117,16 +124,39 @@ func (ebpf *Ebpf1) Run(ctx context.Context, flush <-chan (chan<- error)) {
 			}
 			if err := ebpf.table.Iter().Err(); err != nil {
 				chErr <- fmt.Errorf("error iterating table: %w\n", err)
+				return
 			}
 			if err := ebpf.table.DeleteAll(); err != nil {
 				chErr <- fmt.Errorf("error deleting table: %w\n", err)
 				return
 			}
-			if err := ebpf.consumer.Push(time.Now(), flows4, nil, nil, nil); err != nil {
+			// IPv6
+			for it := ebpf.table6.Iter(); it.Next(); {
+				var fl flow.Sample6
+				if err := restruct.Unpack(it.Key(), binary.BigEndian, &fl); err != nil {
+					chErr <- fmt.Errorf("unpacking of flow6 failed: %v", err)
+					return
+				}
+				flows6 = append(flows6, flow.Sample6L{
+					Flow: fl,
+					Tot:  binary.LittleEndian.Uint64(it.Leaf()),
+				})
+			}
+			if err := ebpf.table6.Iter().Err(); err != nil {
+				chErr <- fmt.Errorf("error iterating table6: %w\n", err)
+				return
+			}
+			if err := ebpf.table6.DeleteAll(); err != nil {
+				chErr <- fmt.Errorf("error deleting table6: %w\n", err)
+				return
+			}
+			// Push to consumer
+			if err := ebpf.consumer.Push(time.Now(), flows4, nil, flows6, nil); err != nil {
 				chErr <- fmt.Errorf("error from consumer: %w\n", err)
 				return
 			}
 			flows4 = flows4[:0]
+			flows6 = flows6[:0]
 			chErr <- nil
 		}
 	}()

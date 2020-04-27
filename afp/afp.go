@@ -23,6 +23,7 @@ type Afp struct {
 	finished chan struct{}
 	consumer flow.Consumer
 	flows4   flow.Map4
+	flows6   flow.Map6
 }
 
 func (h *Afp) newAfpacketHandle(device string, timeout time.Duration) error {
@@ -63,6 +64,7 @@ func (h *Afp) Init(consumer flow.Consumer) error {
 	h.consumer = consumer
 	h.finished = make(chan struct{})
 	h.flows4 = make(flow.Map4)
+	h.flows6 = make(flow.Map6)
 	if err := h.newAfpacketHandle(*iface, time.Duration(100)*time.Millisecond); err != nil {
 		return fmt.Errorf("afpacket library initialization failed: %w", err)
 	}
@@ -115,6 +117,25 @@ func (h *Afp) Run(ctx context.Context, flush <-chan (chan<- error)) {
 						s.DstPort = uint16(udp.DstPort)
 					}
 					h.flows4[s] += uint64(len(data))
+				} else {
+					err := parser6.DecodeLayers(data, &decoded)
+					if err == nil && hasLayer(decoded, layers.LayerTypeIPv6) {
+						s := flow.Sample6{
+							Proto: uint8(ip6.NextHeader),
+						}
+						copy(s.SrcIP[:16], ip6.SrcIP)
+						copy(s.DstIP[:16], ip6.DstIP)
+						if hasLayer(decoded, layers.LayerTypeTCP) {
+							s.SrcPort = uint16(tcp.SrcPort)
+							s.DstPort = uint16(tcp.DstPort)
+							s.Proto = 6
+						} else if hasLayer(decoded, layers.LayerTypeUDP) {
+							s.SrcPort = uint16(udp.SrcPort)
+							s.DstPort = uint16(udp.DstPort)
+							s.Proto = 17
+						}
+						h.flows6[s] += uint64(len(data))
+					}
 				}
 			}
 			if err == afpacket.ErrTimeout {
@@ -134,8 +155,9 @@ func (h *Afp) Run(ctx context.Context, flush <-chan (chan<- error)) {
 			case chErr := <-flush:
 				chErr <- h.consumer.Push(time.Now(),
 					nil, h.flows4,
-					nil, nil)
+					nil, h.flows6)
 				h.flows4 = make(flow.Map4)
+				h.flows6 = make(flow.Map6)
 			default:
 				break
 			}

@@ -57,50 +57,87 @@ func (ts *TopSites) Push(tick time.Time,
 	flowsL6 flow.List6, flowsM6 flow.Map6) error {
 	fmt.Print(ts.header)
 	now := time.Now().Unix()
-	if len(flowsL4) > 0 {
-		for _, fl := range flowsL4 {
-			fkip := newKIP4(fl.Flow.SrcIP[:])
-			if s := ts.m[fkip]; s != nil {
-				s.from += fl.Tot
-				s.last = now
-			} else {
-				ts.m[fkip] = &site{
-					from: fl.Tot,
-					last: now,
-				}
-			}
-			tkip := newKIP4(fl.Flow.DstIP[:])
-			if s := ts.m[tkip]; s != nil {
-				s.to += fl.Tot
-				s.last = now
-			} else {
-				ts.m[tkip] = &site{
-					to:   fl.Tot,
-					last: now,
-				}
+	for _, fl := range flowsL4 {
+		fkip := newKIP4(fl.Flow.SrcIP[:])
+		if s := ts.m[fkip]; s != nil {
+			s.from += fl.Tot
+			s.last = now
+		} else {
+			ts.m[fkip] = &site{
+				from: fl.Tot,
+				last: now,
 			}
 		}
-	} else {
-		for fl, tot := range flowsM4 {
-			fkip := newKIP4(fl.SrcIP[:])
-			if s := ts.m[fkip]; s != nil {
-				s.from += tot
-				s.last = now
-			} else {
-				ts.m[fkip] = &site{
-					from: tot,
-					last: now,
-				}
+		tkip := newKIP4(fl.Flow.DstIP[:])
+		if s := ts.m[tkip]; s != nil {
+			s.to += fl.Tot
+			s.last = now
+		} else {
+			ts.m[tkip] = &site{
+				to:   fl.Tot,
+				last: now,
 			}
-			tkip := newKIP4(fl.DstIP[:])
-			if s := ts.m[tkip]; s != nil {
-				s.to += tot
-				s.last = now
-			} else {
-				ts.m[tkip] = &site{
-					to:   tot,
-					last: now,
-				}
+		}
+	}
+	for fl, tot := range flowsM4 {
+		fkip := newKIP4(fl.SrcIP[:])
+		if s := ts.m[fkip]; s != nil {
+			s.from += tot
+			s.last = now
+		} else {
+			ts.m[fkip] = &site{
+				from: tot,
+				last: now,
+			}
+		}
+		tkip := newKIP4(fl.DstIP[:])
+		if s := ts.m[tkip]; s != nil {
+			s.to += tot
+			s.last = now
+		} else {
+			ts.m[tkip] = &site{
+				to:   tot,
+				last: now,
+			}
+		}
+	}
+	for _, fl := range flowsL6 {
+		if s := ts.m[fl.Flow.SrcIP]; s != nil {
+			s.from += fl.Tot
+			s.last = now
+		} else {
+			ts.m[fl.Flow.SrcIP] = &site{
+				from: fl.Tot,
+				last: now,
+			}
+		}
+		if s := ts.m[fl.Flow.DstIP]; s != nil {
+			s.to += fl.Tot
+			s.last = now
+		} else {
+			ts.m[fl.Flow.DstIP] = &site{
+				to:   fl.Tot,
+				last: now,
+			}
+		}
+	}
+	for fl, tot := range flowsM6 {
+		if s := ts.m[fl.SrcIP]; s != nil {
+			s.from += tot
+			s.last = now
+		} else {
+			ts.m[fl.SrcIP] = &site{
+				from: tot,
+				last: now,
+			}
+		}
+		if s := ts.m[fl.DstIP]; s != nil {
+			s.to += tot
+			s.last = now
+		} else {
+			ts.m[fl.DstIP] = &site{
+				to:   tot,
+				last: now,
 			}
 		}
 	}

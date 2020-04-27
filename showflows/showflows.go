@@ -34,44 +34,43 @@ func (sh *ShowFlows) Init() error {
 	return nil
 }
 
+func (sh *ShowFlows) appendFlow(srcIP []byte, srcPort uint16, dstIP []byte, dstPort uint16,
+	proto uint8, tot uint64) {
+	srcAddr := net.TCPAddr{
+		IP:   net.IP(srcIP),
+		Port: int(srcPort),
+	}
+	dstAddr := net.TCPAddr{
+		IP:   net.IP(dstIP),
+		Port: int(dstPort),
+	}
+	sh.flows = append(sh.flows, sflow{
+		from:  srcAddr.String(),
+		to:    dstAddr.String(),
+		proto: flow.NewProto(proto).String(),
+		n:     tot,
+	})
+}
+
 func (sh *ShowFlows) Push(tick time.Time,
 	flowsL4 flow.List4, flowsM4 flow.Map4,
 	flowsL6 flow.List6, flowsM6 flow.Map6) error {
 	fmt.Print(sh.header)
-	if len(flowsL4) > 0 {
-		for _, fl := range flowsL4 {
-			srcAddr := net.TCPAddr{
-				IP:   net.IP(fl.Flow.SrcIP[:]),
-				Port: int(fl.Flow.SrcPort),
-			}
-			dstAddr := net.TCPAddr{
-				IP:   net.IP(fl.Flow.DstIP[:]),
-				Port: int(fl.Flow.DstPort),
-			}
-			sh.flows = append(sh.flows, sflow{
-				from:  srcAddr.String(),
-				to:    dstAddr.String(),
-				proto: flow.NewProto(fl.Flow.Proto).String(),
-				n:     fl.Tot,
-			})
-		}
-	} else {
-		for fl, tot := range flowsM4 {
-			srcAddr := net.TCPAddr{
-				IP:   net.IP(fl.SrcIP[:]),
-				Port: int(fl.SrcPort),
-			}
-			dstAddr := net.TCPAddr{
-				IP:   net.IP(fl.DstIP[:]),
-				Port: int(fl.DstPort),
-			}
-			sh.flows = append(sh.flows, sflow{
-				from:  srcAddr.String(),
-				to:    dstAddr.String(),
-				proto: flow.NewProto(fl.Proto).String(),
-				n:     tot,
-			})
-		}
+	for _, fl := range flowsL4 {
+		sh.appendFlow(fl.Flow.SrcIP[:], fl.Flow.SrcPort,
+			fl.Flow.DstIP[:], fl.Flow.DstPort, fl.Flow.Proto, fl.Tot)
+	}
+	for fl, tot := range flowsM4 {
+		sh.appendFlow(fl.SrcIP[:], fl.SrcPort,
+			fl.DstIP[:], fl.DstPort, fl.Proto, tot)
+	}
+	for _, fl := range flowsL6 {
+		sh.appendFlow(fl.Flow.SrcIP[:], fl.Flow.SrcPort,
+			fl.Flow.DstIP[:], fl.Flow.DstPort, fl.Flow.Proto, fl.Tot)
+	}
+	for fl, tot := range flowsM6 {
+		sh.appendFlow(fl.SrcIP[:], fl.SrcPort,
+			fl.DstIP[:], fl.DstPort, fl.Proto, tot)
 	}
 	sort.Slice(sh.flows, func(i, j int) bool {
 		return sh.flows[i].n > sh.flows[j].n
