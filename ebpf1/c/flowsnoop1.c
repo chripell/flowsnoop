@@ -50,7 +50,8 @@ static int do_count4(struct sk_buff *skb, int len) {
   conn.protocol = ip->protocol;
   conn.src_ip = ip->saddr;
   conn.dst_ip = ip->daddr;
-  if (ip->protocol == 6 || ip->protocol == 17) { /* TCP and UDP have ports */
+  if ((ip->protocol == 6 || ip->protocol == 17) &&
+      skb->transport_header != 0) {
     struct tcphdr *tcp = skb_to_tcphdr(skb);
     conn.src_port = tcp->source;
     conn.dst_port = tcp->dest;
@@ -72,7 +73,8 @@ static int do_count6(struct sk_buff *skb, int len) {
   conn.protocol = ip->nexthdr;
   bpf_probe_read(conn.src_ip, 16, &ip->saddr);
   bpf_probe_read(conn.dst_ip, 16, &ip->daddr);
-  if (conn.protocol == 6 || conn.protocol == 17) { /* TCP and UDP have ports */
+  if ((conn.protocol == 6 || conn.protocol == 17) &&
+      skb->transport_header != 0) {
     struct tcphdr *tcp = skb_to_tcphdr(skb);
     conn.src_port = tcp->source;
     conn.dst_port = tcp->dest;
@@ -95,6 +97,8 @@ static int equal(char *src, char *dst, int n) {
 static void do_count(struct sk_buff *skb, int len, char *dev) {
   DEVS;
   if (CMPS) /* connected by && */
+    return;
+  if (0 == skb->network_header)
     return;
   if (0 == do_count4(skb, len))
     return;
