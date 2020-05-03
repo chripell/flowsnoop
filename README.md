@@ -2,7 +2,12 @@
 
 Flowsnoop is a tool to inspect network flows. Its architecture allows
 different producers and consumers to be matched. You can get a list of
-all the available options by passing the `--help` flag.
+all the available options by passing the `--help` flag. This tool
+focus on estimating data exchanged on ISO/OSI levels from 3 on so
+it doesn't (or at least it tries to not) count level 2 overhead.
+
+It is currently tested on x86_64 and aarch64 (the latter a Raspberry Pi4
+in bridge mode).
 
 # Producers
 
