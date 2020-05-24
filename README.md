@@ -22,6 +22,10 @@ upgraded to a double buffered one.
 `afp` uses the `gopacket` library to capture packets using a mmap-ed
 `AF_PACKET` socket. It is more resource hungry but better tested.
 
+## ebpf2
+
+needs libbpf-0.0.8, bpftool, kernel with BTF
+
 # Consumers
 
 I plan to add a SQLite based consumer for long term storage of flow

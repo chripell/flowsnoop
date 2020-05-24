@@ -12,6 +12,7 @@ import (
 
 	"github.com/chripell/flowsnoop/afp"
 	"github.com/chripell/flowsnoop/ebpf1"
+	"github.com/chripell/flowsnoop/ebpf2"
 	"github.com/chripell/flowsnoop/flow"
 	"github.com/chripell/flowsnoop/showflows"
 	"github.com/chripell/flowsnoop/topsites"
@@ -20,6 +21,7 @@ import (
 func main() {
 	producers := map[string]flow.Producer{
 		"ebpf1": ebpf1.New(),
+		"ebpf2": ebpf2.New(),
 		"afp":   afp.New(),
 	}
 	consumers := map[string]flow.Consumer{
@@ -38,7 +40,7 @@ func main() {
 		consumersL = append(consumersL, n)
 	}
 	consumerS := flag.String("consumer", "topsites", "consumer module: "+strings.Join(consumersL, ","))
-	producerS := flag.String("producer", "ebpf1", "producer module: "+strings.Join(consumersL, ","))
+	producerS := flag.String("producer", "ebpf1", "producer module: "+strings.Join(producersL, ","))
 	flag.Parse()
 
 	sig := make(chan os.Signal, 1)
