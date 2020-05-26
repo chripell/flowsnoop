@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"flag"
 	"fmt"
 	"time"
 	"unsafe"
@@ -35,6 +36,12 @@ type Ebpf2 struct {
 	conn6    *connMap
 }
 
+func memsetLoop(a []byte, v byte) {
+	for i := range a {
+		a[i] = v
+	}
+}
+
 func newConnMap(m *C.struct_bpf_map) *connMap {
 	connDef := C.bpf_map__def(m)
 	cm := &connMap{
@@ -47,6 +54,17 @@ func newConnMap(m *C.struct_bpf_map) *connMap {
 	return cm
 }
 
+const (
+	// Keep the default in sync with BUCKETS in the eBPF program.
+	BUCKETS = 10240
+)
+
+var (
+	iface = flag.String("ebpf2_iface", "all",
+		"Interface on which should listed or all.")
+	buckets = flag.Int("ebpf2_buckets", BUCKETS, "buckets for in-kernel tables.")
+)
+
 func (ebpf *Ebpf2) Init(consumer flow.Consumer) error {
 	ebpf.consumer = consumer
 	if ret := C.bump_memlock_rlimit(); ret != 0 {
@@ -56,9 +74,11 @@ func (ebpf *Ebpf2) Init(consumer flow.Consumer) error {
 	if ebpf.obj == nil {
 		return errors.New("failed to open eBPF object")
 	}
-	// TODO: make interface configurable
-	iface := "eth0\000"
-	for i, ch := range []byte(iface) {
+	target_iface := "\000"
+	if *iface != "all" {
+		target_iface = *iface + "\000"
+	}
+	for i, ch := range []byte(target_iface) {
 		ebpf.obj.rodata.targ_iface[i] = C.char(ch)
 	}
 	if ret := C.flowsnoop2__load(ebpf.obj); ret != 0 {
@@ -70,14 +90,12 @@ func (ebpf *Ebpf2) Init(consumer flow.Consumer) error {
 	ebpf.finished = make(chan struct{})
 	ebpf.conn4 = newConnMap(ebpf.obj.maps.connections)
 	ebpf.conn6 = newConnMap(ebpf.obj.maps.connections6)
-	// TODO: resize if entries different
-	return nil
-}
-
-func memsetLoop(a []byte, v byte) {
-	for i := range a {
-		a[i] = v
+	if *buckets != BUCKETS {
+		fmt.Printf("DELME RESIZING\n")
+		C.bpf_map__resize(ebpf.obj.maps.connections, C.uint(*buckets))
+		C.bpf_map__resize(ebpf.obj.maps.connections6, C.uint(*buckets))
 	}
+	return nil
 }
 
 func loopMap(m *connMap, fl interface{}, appEntry func(len uint64)) error {
@@ -87,9 +105,14 @@ func loopMap(m *connMap, fl interface{}, appEntry func(len uint64)) error {
 			m.kp, m.kp) != 0 {
 			return nil
 		}
-		if ret := C.bpf_map_lookup_and_delete_elem(m.fd,
+		if ret, errno := C.bpf_map_lookup_elem(m.fd,
 			m.kp, m.vp); ret != 0 {
-			return fmt.Errorf("cannot find key: %d", ret)
+			return fmt.Errorf("cannot lookup elem: %d %d", ret, errno)
+		}
+		if ret, errno := C.bpf_map_delete_elem(m.fd,
+			m.kp); ret != 0 {
+			//DELME return fmt.Errorf("cannot delete elem: %d %d", ret, errno)
+			fmt.Printf("cannot delete elem: %d %d", ret, errno)
 		}
 		if err := restruct.Unpack(m.k,
 			binary.BigEndian, fl); err != nil {

@@ -9,7 +9,9 @@
             bpf_probe_read((void *)dst, length, (char *)ctx + __offset); \
         } while (0);
 
-const volatile char targ_iface[15] = {0,};
+const volatile char targ_iface[16] = {0,};
+
+#define BUCKETS 10240
 
 struct conn_s{
   u32 src_ip;
@@ -20,7 +22,7 @@ struct conn_s{
 };
 struct connections_s {
     __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
-    __uint(max_entries, 10240);
+    __uint(max_entries, BUCKETS);
     __type(key, struct conn_s);
     __type(value, u64);
 } connections SEC(".maps");
@@ -34,18 +36,20 @@ struct conn6_s{
 };
 struct connections6_s {
     __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
-    __uint(max_entries, 10240);
+    __uint(max_entries, BUCKETS);
     __type(key, struct conn6_s);
     __type(value, u64);
 } connections6 SEC(".maps");
 
-static int is_equal(char *src, char *dst, int n) {
+static int is_equal(char *got, const volatile char *want, int n) {
   int i;
+  if (want[0] == '\0')
+    return 1;
   for(i=0; i<n; i++) {
-    if (src[i] != dst[i])
-      return 1;
-    if (src[i] == '\0')
+    if (got[i] != want[i])
       return 0;
+    if (got[i] == '\0')
+      return 1;
   }
   return 0;
 }
@@ -126,7 +130,7 @@ static int do_count6(struct sk_buff *skb, int len) {
 }
 
 static __always_inline void do_count(struct sk_buff *skb, int len, char *dev) {
-  if (!is_equal(dev, (char *)targ_iface, 16))
+  if (!is_equal(dev, targ_iface, 16))
     return;
   if (0 == BPF_CORE_READ(skb,network_header))
     return;
