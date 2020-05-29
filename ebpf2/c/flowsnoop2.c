@@ -3,6 +3,10 @@
 #include <bpf/bpf_core_read.h>     /* for BPF CO-RE helpers */
 #include <bpf/bpf_tracing.h>       /* for getting kprobe arguments */
 
+#ifndef BPF_NOEXIST
+#define BPF_NOEXIST     1
+#endif
+
 #define TP_DATA_LOC_READ_CONST(dst, field, length)                        \
         do {                                                              \
             unsigned short __offset = ctx->__data_loc_##field & 0xFFFF;   \
@@ -21,7 +25,7 @@ struct conn_s{
   u8 protocol;
 };
 struct connections_s {
-    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+  __uint(type, BPF_MAP_TYPE_HASH/*BPF_MAP_TYPE_PERCPU_HASH*/);
     __uint(max_entries, BUCKETS);
     __type(key, struct conn_s);
     __type(value, u64);
@@ -76,7 +80,6 @@ static int do_count4(struct sk_buff *skb, int len) {
   struct iphdr *ip = skb_to_iphdr(skb);
   struct conn_s conn = {};
   u64 *oval = 0;
-  u64 nval = 0;
   u8 version;
   bpf_probe_read(&version, 1, ip);
   if ((version & 0xf0) != 0x40)	/* IPv4 only */
@@ -91,11 +94,15 @@ static int do_count4(struct sk_buff *skb, int len) {
     BPF_CORE_READ_INTO(&conn.dst_port, tcp, dest);
   }
   oval = bpf_map_lookup_elem(&connections, &conn);
-  if (oval)
-    *oval += len;
-  else {
+  if (oval) {
+    __sync_fetch_and_add(oval, len);
+  } else {
     u64 nval = len;
-    bpf_map_update_elem(&connections, &conn, &nval, 0);
+    if (bpf_map_update_elem(&connections, &conn, &nval, BPF_NOEXIST) == -1) {
+      oval = bpf_map_lookup_elem(&connections, &conn);
+      if (oval)
+	__sync_fetch_and_add(oval, len);
+    }
   }
   return 0;
 }
@@ -124,7 +131,7 @@ static int do_count6(struct sk_buff *skb, int len) {
     *oval += len;
   else {
     u64 nval = len;
-    bpf_map_update_elem(&connections6, &conn, &nval, 0);
+    bpf_map_update_elem(&connections6, &conn, &nval, BPF_NOEXIST);
   }
   return 0;
 }

@@ -22,10 +22,12 @@ import (
 
 type connMap struct {
 	fd C.int
-	k  []byte
-	kp unsafe.Pointer
+	k  [][]byte
+	ks int
 	v  []byte
 	vp unsafe.Pointer
+	z  []byte
+	zp unsafe.Pointer
 }
 
 type Ebpf2 struct {
@@ -46,11 +48,13 @@ func newConnMap(m *C.struct_bpf_map) *connMap {
 	connDef := C.bpf_map__def(m)
 	cm := &connMap{
 		fd: C.bpf_map__fd(m),
-		k:  make([]byte, connDef.key_size),
+		ks: int(connDef.key_size),
 		v:  make([]byte, connDef.value_size),
+		z:  make([]byte, connDef.key_size),
 	}
-	cm.kp = unsafe.Pointer(&cm.k[0])
 	cm.vp = unsafe.Pointer(&cm.v[0])
+	memsetLoop(cm.z, 0xff)
+	cm.zp = unsafe.Pointer(&cm.z[0])
 	return cm
 }
 
@@ -99,27 +103,39 @@ func (ebpf *Ebpf2) Init(consumer flow.Consumer) error {
 }
 
 func loopMap(m *connMap, fl interface{}, appEntry func(len uint64)) error {
-	memsetLoop(m.k, 0xff)
+	n := 0
 	for {
+		if n == len(m.k) {
+			m.k = append(m.k, make([]byte, m.ks))
+		}
+		p := m.zp
+		if n > 0 {
+			p = unsafe.Pointer(&(m.k[n-1])[0])
+		}
+		np := unsafe.Pointer(&(m.k[n])[0])
 		if C.bpf_map_get_next_key(m.fd,
-			m.kp, m.kp) != 0 {
-			return nil
+			p, np) != 0 {
+			break
 		}
 		if ret, errno := C.bpf_map_lookup_elem(m.fd,
-			m.kp, m.vp); ret != 0 {
+			np, m.vp); ret != 0 {
 			return fmt.Errorf("cannot lookup elem: %d %d", ret, errno)
 		}
-		if ret, errno := C.bpf_map_delete_elem(m.fd,
-			m.kp); ret != 0 {
-			//DELME return fmt.Errorf("cannot delete elem: %d %d", ret, errno)
-			fmt.Printf("cannot delete elem: %d %d", ret, errno)
-		}
-		if err := restruct.Unpack(m.k,
+		if err := restruct.Unpack(m.k[n],
 			binary.BigEndian, fl); err != nil {
 			return fmt.Errorf("unpacking of flow failed: %v", err)
 		}
 		appEntry(binary.LittleEndian.Uint64(m.v))
+		n++
 	}
+	for _, k := range m.k[:n] {
+		kp := unsafe.Pointer(&k[0])
+		if ret, errno := C.bpf_map_delete_elem(m.fd,
+			kp); ret != 0 {
+			return fmt.Errorf("cannot delete elem: %d %d", ret, errno)
+		}
+	}
+	return nil
 }
 
 func (ebpf *Ebpf2) Run(ctx context.Context, flush <-chan (chan<- error)) {
