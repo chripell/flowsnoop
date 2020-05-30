@@ -22,7 +22,6 @@ import (
 
 type connMap struct {
 	fd C.int
-	k  [][]byte
 	ks int
 	v  []byte
 	vp unsafe.Pointer
@@ -35,7 +34,10 @@ type Ebpf2 struct {
 	obj      *C.struct_flowsnoop2
 	finished chan struct{}
 	conn4    *connMap
+	bconn4   *connMap
 	conn6    *connMap
+	bconn6   *connMap
+	currentB bool
 }
 
 func memsetLoop(a []byte, v byte) {
@@ -93,49 +95,52 @@ func (ebpf *Ebpf2) Init(consumer flow.Consumer) error {
 	}
 	ebpf.finished = make(chan struct{})
 	ebpf.conn4 = newConnMap(ebpf.obj.maps.connections)
+	ebpf.bconn4 = newConnMap(ebpf.obj.maps.bconnections)
 	ebpf.conn6 = newConnMap(ebpf.obj.maps.connections6)
+	ebpf.bconn6 = newConnMap(ebpf.obj.maps.bconnections6)
 	if *buckets != BUCKETS {
-		fmt.Printf("DELME RESIZING\n")
 		C.bpf_map__resize(ebpf.obj.maps.connections, C.uint(*buckets))
+		C.bpf_map__resize(ebpf.obj.maps.bconnections, C.uint(*buckets))
 		C.bpf_map__resize(ebpf.obj.maps.connections6, C.uint(*buckets))
+		C.bpf_map__resize(ebpf.obj.maps.bconnections6, C.uint(*buckets))
 	}
 	return nil
 }
 
-func loopMap(m *connMap, fl interface{}, appEntry func(len uint64)) error {
+func loopMap(m *connMap, fl interface{}, k [][]byte, appEntry func(len uint64)) ([][]byte, error) {
 	n := 0
 	for {
-		if n == len(m.k) {
-			m.k = append(m.k, make([]byte, m.ks))
+		if n == len(k) {
+			k = append(k, make([]byte, m.ks))
 		}
 		p := m.zp
 		if n > 0 {
-			p = unsafe.Pointer(&(m.k[n-1])[0])
+			p = unsafe.Pointer(&(k[n-1])[0])
 		}
-		np := unsafe.Pointer(&(m.k[n])[0])
+		np := unsafe.Pointer(&(k[n])[0])
 		if C.bpf_map_get_next_key(m.fd,
 			p, np) != 0 {
 			break
 		}
 		if ret, errno := C.bpf_map_lookup_elem(m.fd,
 			np, m.vp); ret != 0 {
-			return fmt.Errorf("cannot lookup elem: %d %d", ret, errno)
+			return nil, fmt.Errorf("cannot lookup elem: %d %d", ret, errno)
 		}
-		if err := restruct.Unpack(m.k[n],
+		if err := restruct.Unpack(k[n],
 			binary.BigEndian, fl); err != nil {
-			return fmt.Errorf("unpacking of flow failed: %v", err)
+			return nil, fmt.Errorf("unpacking of flow failed: %v", err)
 		}
 		appEntry(binary.LittleEndian.Uint64(m.v))
 		n++
 	}
-	for _, k := range m.k[:n] {
-		kp := unsafe.Pointer(&k[0])
+	for _, ck := range k[:n] {
+		kp := unsafe.Pointer(&ck[0])
 		if ret, errno := C.bpf_map_delete_elem(m.fd,
 			kp); ret != 0 {
-			return fmt.Errorf("cannot delete elem: %d %d", ret, errno)
+			return nil, fmt.Errorf("cannot delete elem: %d %d", ret, errno)
 		}
 	}
-	return nil
+	return k, nil
 }
 
 func (ebpf *Ebpf2) Run(ctx context.Context, flush <-chan (chan<- error)) {
@@ -144,6 +149,11 @@ func (ebpf *Ebpf2) Run(ctx context.Context, flush <-chan (chan<- error)) {
 		var (
 			flows4 []flow.Sample4L
 			flows6 []flow.Sample6L
+			k4     [][]byte
+			k6     [][]byte
+			err    error
+			read4  *connMap
+			read6  *connMap
 		)
 		for {
 			var chErr chan<- error
@@ -153,27 +163,44 @@ func (ebpf *Ebpf2) Run(ctx context.Context, flush <-chan (chan<- error)) {
 			case chErr = <-flush:
 				break
 			}
+			// Select which map we are reading and
+			// redirect recording to the other
+			if ebpf.currentB {
+				read4 = ebpf.bconn4
+				read6 = ebpf.bconn6
+				ebpf.obj.bss.use_map = 0
+			} else {
+				read4 = ebpf.conn4
+				read6 = ebpf.conn6
+				ebpf.obj.bss.use_map = 1
+			}
+			// Give time for eBPF update to finish on the
+			// current map. This looks *plenty* of time.
+			time.Sleep(10 * time.Millisecond)
+			ebpf.currentB = !ebpf.currentB
 			// IPv4
 			var fl4 flow.Sample4
-			if err := loopMap(ebpf.conn4, &fl4,
+			k4, err = loopMap(read4, &fl4, k4,
 				func(n uint64) {
 					flows4 = append(flows4, flow.Sample4L{
 						Flow: fl4,
 						Tot:  n,
 					})
-				}); err != nil {
+				})
+			if err != nil {
 				chErr <- err
 				return
 			}
 			// IPv6
 			var fl6 flow.Sample6
-			if err := loopMap(ebpf.conn6, &fl6,
+			k6, err = loopMap(read6, &fl6, k6,
 				func(n uint64) {
 					flows6 = append(flows6, flow.Sample6L{
 						Flow: fl6,
 						Tot:  n,
 					})
-				}); err != nil {
+				})
+			if err != nil {
 				chErr <- err
 				return
 			}

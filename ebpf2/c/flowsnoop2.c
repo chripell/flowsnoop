@@ -13,7 +13,10 @@
             bpf_probe_read((void *)dst, length, (char *)ctx + __offset); \
         } while (0);
 
-const volatile char targ_iface[16] = {0,};
+const volatile char targ_iface[16] = {
+    0,
+};
+volatile int use_map = 0;
 
 #define BUCKETS 10240
 
@@ -29,7 +32,7 @@ struct connections_s {
     __uint(max_entries, BUCKETS);
     __type(key, struct conn_s);
     __type(value, u64);
-} connections SEC(".maps");
+} connections SEC(".maps"), bconnections SEC(".maps");
 
 struct conn6_s{
   u8 src_ip[16];
@@ -43,7 +46,7 @@ struct connections6_s {
     __uint(max_entries, BUCKETS);
     __type(key, struct conn6_s);
     __type(value, u64);
-} connections6 SEC(".maps");
+} connections6 SEC(".maps"), bconnections6 SEC(".maps");
 
 static int is_equal(char *got, const volatile char *want, int n) {
   int i;
@@ -81,6 +84,7 @@ static int do_count4(struct sk_buff *skb, int len) {
   struct conn_s conn = {};
   u64 *oval = 0;
   u8 version;
+  struct connections_s *conn_table = &connections;
   bpf_probe_read(&version, 1, ip);
   if ((version & 0xf0) != 0x40)	/* IPv4 only */
     return -1;
@@ -93,13 +97,15 @@ static int do_count4(struct sk_buff *skb, int len) {
     BPF_CORE_READ_INTO(&conn.src_port, tcp, source);
     BPF_CORE_READ_INTO(&conn.dst_port, tcp, dest);
   }
-  oval = bpf_map_lookup_elem(&connections, &conn);
+  if (use_map)
+    conn_table = &bconnections;
+  oval = bpf_map_lookup_elem(conn_table, &conn);
   if (oval) {
     __sync_fetch_and_add(oval, len);
   } else {
     u64 nval = len;
-    if (bpf_map_update_elem(&connections, &conn, &nval, BPF_NOEXIST) == -1) {
-      oval = bpf_map_lookup_elem(&connections, &conn);
+    if (bpf_map_update_elem(conn_table, &conn, &nval, BPF_NOEXIST) == -1) {
+      oval = bpf_map_lookup_elem(conn_table, &conn);
       if (oval)
 	__sync_fetch_and_add(oval, len);
     }
@@ -113,6 +119,7 @@ static int do_count6(struct sk_buff *skb, int len) {
   u64 *oval = 0;
   u64 nval = 0;
   u8 version;
+  struct connections6_s *conn_table = &connections6;
   bpf_probe_read(&version, 1, ip);
   if ((version & 0xf0) != 0x60)	/* IPv6 only */
     return -1;
@@ -126,12 +133,18 @@ static int do_count6(struct sk_buff *skb, int len) {
     BPF_CORE_READ_INTO(&conn.src_port, tcp, source);
     BPF_CORE_READ_INTO(&conn.dst_port, tcp, dest);
   }
-  oval = bpf_map_lookup_elem(&connections6, &conn);
-  if (oval)
-    *oval += len;
-  else {
+  if (use_map)
+    conn_table = &bconnections6;
+  oval = bpf_map_lookup_elem(conn_table, &conn);
+  if (oval) {
+    __sync_fetch_and_add(oval, len);
+  } else {
     u64 nval = len;
-    bpf_map_update_elem(&connections6, &conn, &nval, BPF_NOEXIST);
+    if (bpf_map_update_elem(conn_table, &conn, &nval, BPF_NOEXIST) == -1) {
+      oval = bpf_map_lookup_elem(conn_table, &conn);
+      if (oval)
+	__sync_fetch_and_add(oval, len);
+    }
   }
   return 0;
 }
@@ -161,7 +174,7 @@ int tracepoint__net_net_dev_start_xmit(struct trace_event_raw_net_dev_start_xmit
   char dev[16] = {0,};
   struct sk_buff *skb = (struct sk_buff *) ctx->skbaddr;
   TP_DATA_LOC_READ_CONST(dev, name, 16);
-  do_count(skb, ctx->len, dev);
+  do_count(skb, ctx->len - ctx->network_offset, dev);
   return 0;
 }
 
