@@ -11,6 +11,30 @@ in bridge mode).
 
 # Producers
 
+## ebpf2
+
+`ebpf2` uses *CO-RE libbpf* library and so has no external
+dependencies but `libbpf.so` and a kernel supporting eBPF for
+tracepoints. For simplicity, some generated files are included in the
+git repository (although the targets for generating them are in the
+`Makefile`:
+
+* `vmlinux.h` has the BTF information dumped from the kernel. It needs
+  `bpftool` and a fairly new kernel (5.6 or later) with BTF support
+  compiled in.
+  
+* The *skeleton* file, which embodies the compiled code and the
+  interface in C. It needs `clang` and `bpftool` to be generated.
+  
+I *think* this version correctly handles concurrency:
+
+* The eBPF part uses the atomicity of `__sync_fetch_and_add` and
+  `bpf_map_update_elem` to avoid races by multiple CPUs.
+  
+* The reading of maps is based on 2 separate maps for each IP
+  protocol, i.e. uses double buffering. While a map is read to user
+  level, another one is used to store data in-kernel.
+
 ## ebpf1
 
 This is a simple but very efficient eBPF based producer. Currently it
