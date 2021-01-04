@@ -1,17 +1,17 @@
-#include "vmlinux.h"   /* all kernel types */
-#include <bpf/bpf_helpers.h>       /* most used helpers: SEC, __always_inline, etc */
-#include <bpf/bpf_core_read.h>     /* for BPF CO-RE helpers */
-#include <bpf/bpf_tracing.h>       /* for getting kprobe arguments */
+#include "vmlinux.h"           /* all kernel types */
+#include <bpf/bpf_core_read.h> /* for BPF CO-RE helpers */
+#include <bpf/bpf_helpers.h> /* most used helpers: SEC, __always_inline, etc */
+#include <bpf/bpf_tracing.h> /* for getting kprobe arguments */
 
 #ifndef BPF_NOEXIST
-#define BPF_NOEXIST     1
+#define BPF_NOEXIST 1
 #endif
 
-#define TP_DATA_LOC_READ_CONST(dst, field, length)                        \
-        do {                                                              \
-            unsigned short __offset = ctx->__data_loc_##field & 0xFFFF;   \
-            bpf_probe_read((void *)dst, length, (char *)ctx + __offset); \
-        } while (0);
+#define TP_DATA_LOC_READ_CONST(dst, field, length)                             \
+  do {                                                                         \
+    unsigned short __offset = ctx->__data_loc_##field & 0xFFFF;                \
+    bpf_probe_read((void *)dst, length, (char *)ctx + __offset);               \
+  } while (0);
 
 const volatile char targ_iface[16] = {
     0,
@@ -20,7 +20,7 @@ volatile int use_map = 0;
 
 #define BUCKETS 10240
 
-struct conn_s{
+struct conn_s {
   u32 src_ip;
   u32 dst_ip;
   u16 src_port;
@@ -28,13 +28,13 @@ struct conn_s{
   u8 protocol;
 };
 struct connections_s {
-  __uint(type, BPF_MAP_TYPE_HASH/*BPF_MAP_TYPE_PERCPU_HASH*/);
-    __uint(max_entries, BUCKETS);
-    __type(key, struct conn_s);
-    __type(value, u64);
+  __uint(type, BPF_MAP_TYPE_HASH /*BPF_MAP_TYPE_PERCPU_HASH*/);
+  __uint(max_entries, BUCKETS);
+  __type(key, struct conn_s);
+  __type(value, u64);
 } connections SEC(".maps"), bconnections SEC(".maps");
 
-struct conn6_s{
+struct conn6_s {
   u8 src_ip[16];
   u8 dst_ip[16];
   u16 src_port;
@@ -42,17 +42,17 @@ struct conn6_s{
   u8 protocol;
 };
 struct connections6_s {
-    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
-    __uint(max_entries, BUCKETS);
-    __type(key, struct conn6_s);
-    __type(value, u64);
+  __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+  __uint(max_entries, BUCKETS);
+  __type(key, struct conn6_s);
+  __type(value, u64);
 } connections6 SEC(".maps"), bconnections6 SEC(".maps");
 
 static int is_equal(char *got, const volatile char *want, int n) {
   int i;
   if (want[0] == '\0')
     return 1;
-  for(i=0; i<n; i++) {
+  for (i = 0; i < n; i++) {
     if (got[i] != want[i])
       return 0;
     if (got[i] == '\0')
@@ -61,22 +61,19 @@ static int is_equal(char *got, const volatile char *want, int n) {
   return 0;
 }
 
-static inline struct tcphdr *skb_to_tcphdr(const struct sk_buff *skb)
-{
+static inline struct tcphdr *skb_to_tcphdr(const struct sk_buff *skb) {
   return (struct tcphdr *)(BPF_CORE_READ(skb, head) +
-			   BPF_CORE_READ(skb, transport_header));
+                           BPF_CORE_READ(skb, transport_header));
 }
 
-static inline struct iphdr *skb_to_iphdr(const struct sk_buff *skb)
-{
+static inline struct iphdr *skb_to_iphdr(const struct sk_buff *skb) {
   return (struct iphdr *)(BPF_CORE_READ(skb, head) +
-			  BPF_CORE_READ(skb, network_header));
+                          BPF_CORE_READ(skb, network_header));
 }
 
-static inline struct ipv6hdr *skb_to_ipv6hdr(const struct sk_buff *skb)
-{
+static inline struct ipv6hdr *skb_to_ipv6hdr(const struct sk_buff *skb) {
   return (struct ipv6hdr *)(BPF_CORE_READ(skb, head) +
-			  BPF_CORE_READ(skb, network_header));
+                            BPF_CORE_READ(skb, network_header));
 }
 
 static int do_count4(struct sk_buff *skb, int len) {
@@ -86,7 +83,7 @@ static int do_count4(struct sk_buff *skb, int len) {
   u8 version;
   struct connections_s *conn_table = &connections;
   bpf_probe_read(&version, 1, ip);
-  if ((version & 0xf0) != 0x40)	/* IPv4 only */
+  if ((version & 0xf0) != 0x40) /* IPv4 only */
     return -1;
   BPF_CORE_READ_INTO(&conn.protocol, ip, protocol);
   BPF_CORE_READ_INTO(&conn.src_ip, ip, saddr);
@@ -107,7 +104,7 @@ static int do_count4(struct sk_buff *skb, int len) {
     if (bpf_map_update_elem(conn_table, &conn, &nval, BPF_NOEXIST) == -1) {
       oval = bpf_map_lookup_elem(conn_table, &conn);
       if (oval)
-	__sync_fetch_and_add(oval, len);
+        __sync_fetch_and_add(oval, len);
     }
   }
   return 0;
@@ -121,7 +118,7 @@ static int do_count6(struct sk_buff *skb, int len) {
   u8 version;
   struct connections6_s *conn_table = &connections6;
   bpf_probe_read(&version, 1, ip);
-  if ((version & 0xf0) != 0x60)	/* IPv6 only */
+  if ((version & 0xf0) != 0x60) /* IPv6 only */
     return -1;
   /* TODO: check this, it is not correct in all cases. */
   BPF_CORE_READ_INTO(&conn.protocol, ip, nexthdr);
@@ -143,7 +140,7 @@ static int do_count6(struct sk_buff *skb, int len) {
     if (bpf_map_update_elem(conn_table, &conn, &nval, BPF_NOEXIST) == -1) {
       oval = bpf_map_lookup_elem(conn_table, &conn);
       if (oval)
-	__sync_fetch_and_add(oval, len);
+        __sync_fetch_and_add(oval, len);
     }
   }
   return 0;
@@ -152,7 +149,7 @@ static int do_count6(struct sk_buff *skb, int len) {
 static __always_inline void do_count(struct sk_buff *skb, int len, char *dev) {
   if (!is_equal(dev, targ_iface, 16))
     return;
-  if (0 == BPF_CORE_READ(skb,network_header))
+  if (0 == BPF_CORE_READ(skb, network_header))
     return;
   if (0 == do_count4(skb, len))
     return;
@@ -161,18 +158,24 @@ static __always_inline void do_count(struct sk_buff *skb, int len, char *dev) {
 }
 
 SEC("tracepoint/net/netif_receive_skb")
-int tracepoint__net_netif_receive_skb(struct trace_event_raw_net_dev_template *ctx) {
-  char dev[16] = {0,};
-  struct sk_buff *skb = (struct sk_buff *) ctx->skbaddr;
+int tracepoint__net_netif_receive_skb(
+    struct trace_event_raw_net_dev_template *ctx) {
+  char dev[16] = {
+      0,
+  };
+  struct sk_buff *skb = (struct sk_buff *)ctx->skbaddr;
   TP_DATA_LOC_READ_CONST(dev, name, 16);
   do_count(skb, ctx->len, dev);
   return 0;
 }
 
 SEC("tracepoint/net/net_dev_start_xmit")
-int tracepoint__net_net_dev_start_xmit(struct trace_event_raw_net_dev_start_xmit *ctx) {
-  char dev[16] = {0,};
-  struct sk_buff *skb = (struct sk_buff *) ctx->skbaddr;
+int tracepoint__net_net_dev_start_xmit(
+    struct trace_event_raw_net_dev_start_xmit *ctx) {
+  char dev[16] = {
+      0,
+  };
+  struct sk_buff *skb = (struct sk_buff *)ctx->skbaddr;
   TP_DATA_LOC_READ_CONST(dev, name, 16);
   do_count(skb, ctx->len - ctx->network_offset, dev);
   return 0;

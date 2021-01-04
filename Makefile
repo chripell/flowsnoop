@@ -20,10 +20,12 @@ ebpf1/flowsnoop1.go: ebpf1/c/flowsnoop1.c
 ebpf2/c/vmlinux.h:
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@
 
-ebpf2/c/flowsnoop2.o: ebpf2/c/flowsnoop2.c
+skeltons = ebpf2/c/flowsnoop2_skel.h
+
+$(skeltons): %_skel.h: %.o
+	bpftool gen skeleton $^ > $@
+
+$(skeltons:_skel.h=.o): %.o: %.c
 	$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH) \
 		$(INCLUDES) -c $(filter %.c,$^) -o $@ && \
 	$(LLVM_STRIP) -g $@
-
-ebpf2/c/flowsnoop2_skel.h: ebpf2/c/flowsnoop2.o
-	bpftool gen skeleton $^ > $@

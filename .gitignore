@@ -4,6 +4,7 @@
 *.dll
 *.so
 *.dylib
+*.o
 
 # Test binary, built with `go test -c`
 *.test
@@ -19,3 +20,4 @@ flowsnoop
 *~
 README.html
 __debug_bin
+.ccls-cache
