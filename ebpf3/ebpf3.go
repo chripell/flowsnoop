@@ -35,12 +35,14 @@ type Ebpf3 struct {
 	sw    *goebpf.EbpfMap
 	ipv4a *goebpf.EbpfMap
 	ipv4b *goebpf.EbpfMap
+	ipv6a *goebpf.EbpfMap
+	ipv6b *goebpf.EbpfMap
 	curr  bool
 }
 
 var (
 	iface = flag.String("ebpf3_iface", "",
-		"Interfaces on which should listed (comma separated).")
+		"Interfaces on which should listed (comma separated)x.")
 	ebpfs = flag.String("ebpf3_ebpfs", "/sys/fs/bpf/tc/globals",
 		"Path to ebpfs, where pinned maps are available..")
 )
@@ -149,21 +151,34 @@ func (ebpf *Ebpf3) Init(consumer flow.Consumer) error {
 	if err != nil {
 		return err
 	}
+	ebpf.ipv6a, err = openMap("flowsnoop_6_0")
+	if err != nil {
+		return err
+	}
+	ebpf.ipv6b, err = openMap("flowsnoop_6_1")
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
 func (ebpf *Ebpf3) updateMaps() error {
 	var (
-		rm4    *goebpf.EbpfMap
 		next   uint32
+		rm4    *goebpf.EbpfMap
 		flows4 []flow.Sample4L
 		keys4  [][]byte
+		rm6    *goebpf.EbpfMap
+		flows6 []flow.Sample6L
+		keys6  [][]byte
 	)
 	if ebpf.curr {
 		rm4 = ebpf.ipv4b
+		rm6 = ebpf.ipv6b
 		next = 0
 	} else {
 		rm4 = ebpf.ipv4a
+		rm6 = ebpf.ipv6a
 		next = 1
 	}
 	// Give time for eBPF update to finish on the
@@ -200,8 +215,37 @@ func (ebpf *Ebpf3) updateMaps() error {
 			return fmt.Errorf("deleting of ipv4 flow failed: %w", err)
 		}
 	}
+	keys4 = nil
+	// Handle IPv6 maps.
+	k6 := make([]byte, 37)
+	for {
+		nk, err := rm6.GetNextKey(k6)
+		if err != nil {
+			break
+		}
+		data, err := rm6.Lookup(nk)
+		if err != nil {
+			return fmt.Errorf("ipv6 table lookup failed: %w", err)
+		}
+		var fl flow.Sample6
+		if err := restruct.Unpack(nk, binary.BigEndian, &fl); err != nil {
+			return fmt.Errorf("unpacking of ipv6 flow failed: %w", err)
+		}
+		flows6 = append(flows6, flow.Sample6L{
+			Flow: fl,
+			Tot:  binary.LittleEndian.Uint64(data),
+		})
+		keys6 = append(keys6, nk)
+		k6 = nk
+	}
+	for _, k := range keys6 {
+		if err := rm6.Delete(k); err != nil {
+			return fmt.Errorf("deleting of ipv6 flow failed: %w", err)
+		}
+	}
+	keys6 = nil
 	// Push maps.
-	if err := ebpf.consumer.Push(time.Now(), flows4, nil, nil, nil); err != nil {
+	if err := ebpf.consumer.Push(time.Now(), flows4, nil, flows6, nil); err != nil {
 		return fmt.Errorf("error from consumer: %w\n", err)
 	}
 	return nil

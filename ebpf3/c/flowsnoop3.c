@@ -1,8 +1,10 @@
 #include <linux/types.h>
 #include <linux/bpf.h>
-#include <linux/tcp.h>
+#include <linux/udp.h>
 #include <linux/ip.h>
+#include <linux/ipv6.h>
 #include <linux/in.h>
+#include <linux/in6.h>
 #include <linux/if_ether.h>
 #include <linux/pkt_cls.h>
 #include <stdint.h>
@@ -37,8 +39,8 @@ struct bpf_elf_map flowsnoop_4_1 SEC("maps") = {
 };
 
 struct conn6_s {
-  uint8_t src_ip[16];
-  uint8_t dst_ip[16];
+  struct in6_addr src_ip;
+  struct in6_addr dst_ip;
   uint16_t src_port;
   uint16_t dst_port;
   uint8_t protocol;
@@ -113,8 +115,7 @@ static __always_inline int ipv4_hdrlen(struct iphdr *ip4)
 static __always_inline int account_data(struct __sk_buff *skb)
 {
   struct ethhdr *eth;
-  struct tcphdr *tcp;
-  struct iphdr *iph;
+  struct udphdr *udp;
   uint32_t hdrlen, var_off, const_off;
   uint32_t *sw;
   uint32_t zero = 0;
@@ -122,40 +123,74 @@ static __always_inline int account_data(struct __sk_buff *skb)
   uint64_t len = skb->len - sizeof(struct ethhdr);
   var_off = 0;
   const_off = 0;
+  sw = bpf_map_lookup_elem(&flowsnoop_switch, &zero);
   ensure_header(skb, var_off, const_off, eth);
-  if (eth->h_proto != bpf_htons(ETH_P_IP))
-    return TC_ACT_OK;
-  const_off += ETH_HLEN;
-  ensure_header(skb, var_off, const_off, iph);
-  if (iph->version == 4) {
-    struct conn_s conn = {};
-    struct bpf_elf_map *conn_table = &flowsnoop_4_0;
-    conn.src_ip = iph->saddr;
-    conn.dst_ip = iph->daddr;
-    conn.protocol = iph->protocol;
-    if ((conn.protocol == 6 || conn.protocol == 17) && !ip_is_fragment(iph)) {
-      hdrlen = ipv4_hdrlen(iph);
-      var_off += hdrlen;
-      ensure_header(skb, var_off, const_off, tcp);
-      conn.src_port = tcp->source;
-      conn.dst_port = tcp->dest;
-    }
-    sw = bpf_map_lookup_elem(&flowsnoop_switch, &zero);
-    if (sw && *sw == 1) {
-      conn_table = &flowsnoop_4_1;
-    }
-    oval = bpf_map_lookup_elem(conn_table, &conn);
-    if (oval) {
-      __sync_fetch_and_add(oval, len);
-    } else {
-      uint64_t nval = len;
-      if (bpf_map_update_elem(conn_table, &conn, &nval, BPF_NOEXIST) == -1) {
-	oval = bpf_map_lookup_elem(conn_table, &conn);
-	if (oval)
-	  __sync_fetch_and_add(oval, len);
+  if (eth->h_proto == bpf_htons(ETH_P_IP)) {
+    struct iphdr *iph;
+    const_off += ETH_HLEN;
+    ensure_header(skb, var_off, const_off, iph);
+    if (iph->version == 4) {
+      struct conn_s conn = {};
+      struct bpf_elf_map *conn_table = &flowsnoop_4_0;
+      conn.src_ip = iph->saddr;
+      conn.dst_ip = iph->daddr;
+      conn.protocol = iph->protocol;
+      if ((conn.protocol == 6 || conn.protocol == 17) && !ip_is_fragment(iph)) {
+	hdrlen = ipv4_hdrlen(iph);
+	var_off += hdrlen;
+	ensure_header(skb, var_off, const_off, udp);
+	conn.src_port = udp->source;
+	conn.dst_port = udp->dest;
+      }
+      if (sw && *sw == 1) {
+	conn_table = &flowsnoop_4_1;
+      }
+      oval = bpf_map_lookup_elem(conn_table, &conn);
+      if (oval) {
+	__sync_fetch_and_add(oval, len);
+      } else {
+	uint64_t nval = len;
+        if (bpf_map_update_elem(conn_table, &conn, &nval, BPF_NOEXIST) == -1) {
+          oval = bpf_map_lookup_elem(conn_table, &conn);
+          if (oval)
+            __sync_fetch_and_add(oval, len);
+        }
       }
     }
-  } // else if (iph->version == 6) {}
+  } else if (eth->h_proto == bpf_htons(ETH_P_IPV6)) {
+    struct ipv6hdr *iph;
+    const_off += ETH_HLEN;
+    ensure_header(skb, var_off, const_off, iph);
+    if (iph->version == 6) {
+      struct conn6_s conn = {};
+      struct bpf_elf_map *conn_table = &flowsnoop_6_0;
+      ensure_header(skb, var_off, const_off, iph);
+      /* TODO: check this, it is not correct in all cases. */
+      conn.protocol = iph->nexthdr;
+      conn.src_ip = iph->saddr;
+      conn.dst_ip = iph->daddr;
+      if (conn.protocol == 6 || conn.protocol == 17) {
+        const_off += sizeof(*iph);
+        ensure_header(skb, var_off, const_off, udp);
+        conn.src_port = udp->source;
+        conn.dst_port = udp->dest;
+      }
+      if (sw && *sw == 1) {
+        conn_table = &flowsnoop_6_1;
+      }
+      oval = bpf_map_lookup_elem(conn_table, &conn);
+      if (oval) {
+        __sync_fetch_and_add(oval, len);
+      } else {
+        uint64_t nval = len;
+        if (bpf_map_update_elem(conn_table, &conn, &nval, BPF_NOEXIST) == -1) {
+          oval = bpf_map_lookup_elem(conn_table, &conn);
+          if (oval)
+            __sync_fetch_and_add(oval, len);
+        }
+      }
+    }
+  }
   return TC_ACT_OK;
 }
 
