@@ -10,10 +10,12 @@ require (
 	github.com/google/gopacket v1.1.19
 	github.com/iovisor/gobpf v0.0.0-20210102170715-cf224c919a95
 	github.com/kr/text v0.2.0 // indirect
+	github.com/mattn/go-sqlite3 v1.14.6
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/stretchr/testify v1.6.1 // indirect
+	github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f // indirect
 	golang.org/x/net v0.0.0-20201224014010-6772e930b67b // indirect
-	golang.org/x/sys v0.0.0-20201231184435-2d18734c6014 // indirect
+	golang.org/x/sys v0.0.0-20210108172913-0df2131ae363 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/restruct.v1 v1.0.0-20190323193435-3c2afb705f3c
 	gopkg.in/yaml.v2 v2.4.0 // indirect

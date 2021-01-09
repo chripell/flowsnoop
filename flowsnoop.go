@@ -16,6 +16,7 @@ import (
 	"github.com/chripell/flowsnoop/ebpf3"
 	"github.com/chripell/flowsnoop/flow"
 	"github.com/chripell/flowsnoop/showflows"
+	"github.com/chripell/flowsnoop/sqlflows"
 	"github.com/chripell/flowsnoop/topsites"
 )
 
@@ -29,6 +30,7 @@ func main() {
 	consumers := map[string]flow.Consumer{
 		"topsites":  topsites.New(),
 		"showflows": showflows.New(),
+		"sqlflows":  sqlflows.New(),
 	}
 	every := flag.Duration("every", time.Duration(30)*time.Second, "Interval between display refreshes. ")
 	var (

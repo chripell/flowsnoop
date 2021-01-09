@@ -64,9 +64,6 @@ upgraded to a double buffered one.
 
 # Consumers
 
-I plan to add a SQLite based consumer for long term storage of flow
-information.
-
 ## showflows
 
 It simply prints all the captured network flows.
@@ -75,6 +72,9 @@ It simply prints all the captured network flows.
 
 `topsites` shows the most active traffic sources and destinations.
 
+## sqlflows
+
+`sqlflows` stores flows information into a sqlite3 data base.
 
 
 
