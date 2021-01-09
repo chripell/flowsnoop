@@ -12,7 +12,8 @@ import (
 )
 
 type SqlFlows struct {
-	db *sql.DB
+	db       *sql.DB
+	prevTick time.Time
 }
 
 var (
@@ -53,7 +54,7 @@ src_ip TEXT,
 src_port INTEGER,
 dst_ip TEXT,
 dst_port INTEGER,
-bytes INTEGER);
+bytes_sec FLOAT);
 `)
 	if err != nil {
 		return fmt.Errorf("create or insert failed: %w", err)
@@ -64,40 +65,46 @@ bytes INTEGER);
 func (sf *SqlFlows) Push(tick time.Time,
 	flowsL4 flow.List4, flowsM4 flow.Map4,
 	flowsL6 flow.List6, flowsM6 flow.Map6) error {
+	if sf.prevTick.IsZero() {
+		sf.prevTick = tick
+		return nil
+	}
+	delta := float64(tick.Sub(sf.prevTick)) / 1_000_000_000.0
+	sf.prevTick = tick
 	jd := julian(tick)
 	tx, err := sf.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin transaction failed: %w", err)
 	}
-	stmt, err := tx.Prepare("insert into flows(jd, proto, src_ip, src_port, dst_ip, dst_port, bytes) values(?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := tx.Prepare("insert into flows(jd, src_ip, src_port, dst_ip, dst_port, proto, bytes_sec) values(?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("prepare failed: %w", err)
 	}
 	defer stmt.Close()
 	for _, fl := range flowsL4 {
 		_, err = stmt.Exec(jd, pip(fl.Flow.SrcIP[:]), fl.Flow.SrcPort,
-			pip(fl.Flow.DstIP[:]), fl.Flow.DstPort, fl.Flow.Proto, fl.Tot)
+			pip(fl.Flow.DstIP[:]), fl.Flow.DstPort, fl.Flow.Proto, float64(fl.Tot)/delta)
 		if err != nil {
 			return fmt.Errorf("exec failed: %w", err)
 		}
 	}
 	for fl, tot := range flowsM4 {
 		_, err = stmt.Exec(jd, pip(fl.SrcIP[:]), fl.SrcPort,
-			pip(fl.DstIP[:]), fl.DstPort, fl.Proto, tot)
+			pip(fl.DstIP[:]), fl.DstPort, fl.Proto, float64(tot)/delta)
 		if err != nil {
 			return fmt.Errorf("exec failed: %w", err)
 		}
 	}
 	for _, fl := range flowsL6 {
 		_, err = stmt.Exec(jd, pip(fl.Flow.SrcIP[:]), fl.Flow.SrcPort,
-			pip(fl.Flow.DstIP[:]), fl.Flow.DstPort, uint16(fl.Flow.Proto)+256, fl.Tot)
+			pip(fl.Flow.DstIP[:]), fl.Flow.DstPort, uint16(fl.Flow.Proto)+256, float64(fl.Tot)/delta)
 		if err != nil {
 			return fmt.Errorf("exec failed: %w", err)
 		}
 	}
 	for fl, tot := range flowsM6 {
 		_, err = stmt.Exec(jd, pip(fl.SrcIP[:]), fl.SrcPort,
-			pip(fl.DstIP[:]), fl.DstPort, uint16(fl.Proto)+256, tot)
+			pip(fl.DstIP[:]), fl.DstPort, uint16(fl.Proto)+256, float64(tot)/delta)
 		if err != nil {
 			return fmt.Errorf("exec failed: %w", err)
 		}
