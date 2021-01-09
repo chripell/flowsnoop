@@ -174,6 +174,7 @@ func (ebpf *Ebpf2) Run(ctx context.Context, flush <-chan (chan<- error)) {
 				read6 = ebpf.conn6
 				ebpf.obj.bss.use_map = 1
 			}
+			tick := time.Now()
 			// Give time for eBPF update to finish on the
 			// current map. This looks *plenty* of time.
 			time.Sleep(10 * time.Millisecond)
@@ -205,7 +206,7 @@ func (ebpf *Ebpf2) Run(ctx context.Context, flush <-chan (chan<- error)) {
 				return
 			}
 			// Push to consumer
-			if err := ebpf.consumer.Push(time.Now(), flows4, nil, flows6, nil); err != nil {
+			if err := ebpf.consumer.Push(tick, flows4, nil, flows6, nil); err != nil {
 				chErr <- fmt.Errorf("error from consumer: %w\n", err)
 				return
 			}

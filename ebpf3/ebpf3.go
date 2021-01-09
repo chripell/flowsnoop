@@ -181,13 +181,14 @@ func (ebpf *Ebpf3) updateMaps() error {
 		rm6 = ebpf.ipv6a
 		next = 1
 	}
+	if err := ebpf.sw.Upsert(0, next); err != nil {
+		return fmt.Errorf("map switch failed: %w", err)
+	}
+	tick := time.Now()
 	// Give time for eBPF update to finish on the
 	// current map. This looks *plenty* of time.
 	time.Sleep(10 * time.Millisecond)
 	ebpf.curr = !ebpf.curr
-	if err := ebpf.sw.Upsert(0, next); err != nil {
-		return fmt.Errorf("map switch failed: %w", err)
-	}
 	// Handle IPv4 maps.
 	k4 := make([]byte, 13)
 	for {
@@ -245,7 +246,7 @@ func (ebpf *Ebpf3) updateMaps() error {
 	}
 	keys6 = nil
 	// Push maps.
-	if err := ebpf.consumer.Push(time.Now(), flows4, nil, flows6, nil); err != nil {
+	if err := ebpf.consumer.Push(tick, flows4, nil, flows6, nil); err != nil {
 		return fmt.Errorf("error from consumer: %w\n", err)
 	}
 	return nil
