@@ -4,7 +4,9 @@ go 1.14
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/dropbox/goebpf v0.0.0-20201020203810-72edb057c378
 	github.com/dustin/go-humanize v1.0.0
+	github.com/emicklei/go-restful v2.15.0+incompatible
 	github.com/google/gopacket v1.1.19
 	github.com/iovisor/gobpf v0.0.0-20210102170715-cf224c919a95
 	github.com/kr/text v0.2.0 // indirect

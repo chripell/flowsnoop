@@ -29,3 +29,11 @@ $(skeltons:_skel.h=.o): %.o: %.c
 	$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH) \
 		$(INCLUDES) -c $(filter %.c,$^) -o $@ && \
 	$(LLVM_STRIP) -g $@
+
+tcprogs = ebpf3/c/flowsnoop3.o
+
+$(tcprogs): %.o: %.c
+	$(CLANG) -O2 -target bpf $(INCLUDES) -c $(filter %.c,$^) -o $@
+
+ebpf3/flowsnoop3.go: ebpf3/c/flowsnoop3.o
+	cd ebpf3 ; go generate

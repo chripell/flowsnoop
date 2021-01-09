@@ -11,6 +11,19 @@ in bridge mode).
 
 # Producers
 
+## ebpf3
+
+`ebpf3` hooks into tc classifier to get the information about
+flows. It is surprisingly different from `ebfp2` because the loader is
+different. Also, the `sk_buff` structure has less information and
+requires a more complicated parser.
+
+The Go part uses the library
+[goebpf](https://github.com/dropbox/goebpf) so it doesn't need to
+interface directly with `libepf.h` (it is pure Go, not
+cgo). Otherwise, the map handling logic is very similar to `ebpf2`,
+with double buffering.
+
 ## ebpf2
 
 `ebpf2` uses *CO-RE libbpf* library and so has no external
@@ -45,10 +58,6 @@ upgraded to a double buffered one.
 
 `afp` uses the `gopacket` library to capture packets using a mmap-ed
 `AF_PACKET` socket. It is more resource hungry but better tested.
-
-## ebpf2
-
-needs libbpf-0.0.8, bpftool, kernel with BTF
 
 # Consumers
 

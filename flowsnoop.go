@@ -13,6 +13,7 @@ import (
 	"github.com/chripell/flowsnoop/afp"
 	"github.com/chripell/flowsnoop/ebpf1"
 	"github.com/chripell/flowsnoop/ebpf2"
+	"github.com/chripell/flowsnoop/ebpf3"
 	"github.com/chripell/flowsnoop/flow"
 	"github.com/chripell/flowsnoop/showflows"
 	"github.com/chripell/flowsnoop/topsites"
@@ -22,6 +23,7 @@ func main() {
 	producers := map[string]flow.Producer{
 		"ebpf1": ebpf1.New(),
 		"ebpf2": ebpf2.New(),
+		"ebpf3": ebpf3.New(),
 		"afp":   afp.New(),
 	}
 	consumers := map[string]flow.Consumer{
