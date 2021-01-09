@@ -67,7 +67,7 @@ const (
 
 var (
 	iface = flag.String("ebpf2_iface", "all",
-		"Interface on which should listed or all.")
+		"Interface on which should listen or all.")
 	buckets = flag.Int("ebpf2_buckets", BUCKETS, "buckets for in-kernel tables.")
 )
 

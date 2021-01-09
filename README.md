@@ -24,6 +24,9 @@ interface directly with `libepf.h` (it is pure Go, not
 cgo). Otherwise, the map handling logic is very similar to `ebpf2`,
 with double buffering.
 
+This is the best producer to use because it assures the sk_buffs are
+linearized.
+
 ## ebpf2
 
 `ebpf2` uses *CO-RE libbpf* library and so has no external

@@ -42,7 +42,7 @@ type Ebpf3 struct {
 
 var (
 	iface = flag.String("ebpf3_iface", "",
-		"Interfaces on which should listed (comma separated)x.")
+		"Interfaces on which should listed (comma separated).")
 	ebpfs = flag.String("ebpf3_ebpfs", "/sys/fs/bpf/tc/globals",
 		"Path to ebpfs, where pinned maps are available..")
 )

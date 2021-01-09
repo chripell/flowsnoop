@@ -42,7 +42,7 @@ func main() {
 		consumersL = append(consumersL, n)
 	}
 	consumerS := flag.String("consumer", "topsites", "consumer module: "+strings.Join(consumersL, ","))
-	producerS := flag.String("producer", "ebpf1", "producer module: "+strings.Join(producersL, ","))
+	producerS := flag.String("producer", "ebpf3", "producer module: "+strings.Join(producersL, ","))
 	flag.Parse()
 
 	sig := make(chan os.Signal, 1)

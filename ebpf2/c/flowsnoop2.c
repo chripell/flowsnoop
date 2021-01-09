@@ -2,9 +2,18 @@
 #include <bpf/bpf_core_read.h> /* for BPF CO-RE helpers */
 #include <bpf/bpf_helpers.h> /* most used helpers: SEC, __always_inline, etc */
 #include <bpf/bpf_tracing.h> /* for getting kprobe arguments */
+#include <bpf/bpf_endian.h>
 
 #ifndef BPF_NOEXIST
 #define BPF_NOEXIST 1
+#endif
+
+#ifndef ETH_P_IP
+#define ETH_P_IP 0x0800
+#endif
+
+#ifndef ETH_P_IPV6
+#define ETH_P_IPV6 0x86DD
 #endif
 
 #define TP_DATA_LOC_READ_CONST(dst, field, length)                             \
@@ -28,7 +37,7 @@ struct conn_s {
   u8 protocol;
 };
 struct connections_s {
-  __uint(type, BPF_MAP_TYPE_HASH /*BPF_MAP_TYPE_PERCPU_HASH*/);
+  __uint(type, BPF_MAP_TYPE_HASH);
   __uint(max_entries, BUCKETS);
   __type(key, struct conn_s);
   __type(value, u64);
@@ -42,7 +51,7 @@ struct conn6_s {
   u8 protocol;
 };
 struct connections6_s {
-  __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+  __uint(type, BPF_MAP_TYPE_HASH);
   __uint(max_entries, BUCKETS);
   __type(key, struct conn6_s);
   __type(value, u64);
@@ -74,6 +83,11 @@ static inline struct iphdr *skb_to_iphdr(const struct sk_buff *skb) {
 static inline struct ipv6hdr *skb_to_ipv6hdr(const struct sk_buff *skb) {
   return (struct ipv6hdr *)(BPF_CORE_READ(skb, head) +
                             BPF_CORE_READ(skb, network_header));
+}
+
+static inline struct ethhdr *skb_to_ethhdr(const struct sk_buff *skb) {
+  return (struct ethhdr *)(BPF_CORE_READ(skb, head) +
+                            BPF_CORE_READ(skb, mac_header));
 }
 
 static int do_count4(struct sk_buff *skb, int len) {
@@ -147,14 +161,17 @@ static int do_count6(struct sk_buff *skb, int len) {
 }
 
 static __always_inline void do_count(struct sk_buff *skb, int len, char *dev) {
+  struct ethhdr *hdr = skb_to_ethhdr(skb);
+  u16 prot = BPF_CORE_READ(hdr, h_proto);
   if (!is_equal(dev, targ_iface, 16))
     return;
-  if (0 == BPF_CORE_READ(skb, network_header))
+  if (BPF_CORE_READ(skb, network_header) == 0)
     return;
-  if (0 == do_count4(skb, len))
-    return;
-  if (0 == do_count6(skb, len))
-    return;
+  if (prot == bpf_htons(ETH_P_IP))
+    do_count4(skb, len);
+  if (prot == bpf_htons(ETH_P_IPV6))
+    do_count6(skb, len);
+  return;
 }
 
 SEC("tracepoint/net/netif_receive_skb")
