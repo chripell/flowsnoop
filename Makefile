@@ -5,7 +5,7 @@ LLVM_STRIP ?= llvm-strip
 all: flowsnoop
 
 .PHONY: flowsnoop
-flowsnoop: ebpf1/flowsnoop1.go
+flowsnoop: ebpf1/flowsnoop1.go ebpf2/c/flowsnoop2_skel.o ebpf3/flowsnoop3.go
 	go build ./...
 	go build -o flowsnoop flowsnoop.go
 
@@ -25,7 +25,7 @@ skeltons = ebpf2/c/flowsnoop2_skel.h
 $(skeltons): %_skel.h: %.o
 	bpftool gen skeleton $^ > $@
 
-$(skeltons:_skel.h=.o): %.o: %.c
+$(skeltons:_skel.h=.o): %.o: %.c ebpf2/c/vmlinux.h
 	$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH) \
 		$(INCLUDES) -c $(filter %.c,$^) -o $@ && \
 	$(LLVM_STRIP) -g $@

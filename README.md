@@ -1,3 +1,5 @@
+**This is not an officially supported Google product**
+
 # Flowsnoop
 
 Flowsnoop is a tool to inspect network flows. Its architecture allows
